@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://abslawoffices.com/sitemap.xml
