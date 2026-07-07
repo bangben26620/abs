@@ -12,7 +12,7 @@
     "css": "tailwindcss -i ./src/css/input.css -o ./dist/assets/css/style.min.css --minify",
     "js": "terser ./src/js/main.js -c -m -o ./dist/assets/js/main.min.js",
     "posthtml": "node ./scripts/posthtml.mjs",
-    "build": "npm run clean && npm run icons && npm run html && npm run copy && npm run vendor && npm run images && npm run css && npm run js && npm run posthtml",
+    "build": "npm run clean && npm run html && npm run copy && npm run vendor && npm run images && npm run css && npm run js && npm run posthtml",
     "preview": "npx serve -s dist",
     "local": "npm run build && node ./scripts/local-server.mjs",
     "dev:api": "node ./scripts/local-server.mjs",
