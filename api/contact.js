@@ -46,7 +46,7 @@ function splitEmails(value = '') {
 }
 
 function getClientIp(headers = {}) {
-  const direct = headers['x-forwarded-for'] || headers['X-Forwarded-For'] || headers['x-real-ip'] || headers['X-Real-IP'];
+  const direct = headers['cf-connecting-ip'] || headers['CF-Connecting-IP'] || headers['x-forwarded-for'] || headers['X-Forwarded-For'] || headers['x-real-ip'] || headers['X-Real-IP'];
   return String(direct || 'unknown').split(',')[0].trim() || 'unknown';
 }
 
@@ -320,6 +320,39 @@ async function parseBody(input) {
   return {};
 }
 
+async function verifyTurnstileToken(token, clientIp) {
+  const secret = String(process.env.TURNSTILE_SECRET_KEY || '').trim();
+  if (!secret) {
+    return { ok: false, status: 500, message: 'Verifikasi keamanan belum dikonfigurasi.' };
+  }
+
+  if (!token || token.length > 4096) {
+    return { ok: false, status: 400, message: 'Verifikasi keamanan diperlukan.' };
+  }
+
+  try {
+    const form = new URLSearchParams({ secret, response: token });
+    if (clientIp && clientIp !== 'unknown') form.set('remoteip', clientIp);
+
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString()
+    });
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      console.error('Turnstile verification failed:', result['error-codes'] || response.status);
+      return { ok: false, status: 400, message: 'Verifikasi keamanan gagal. Silakan coba kembali.' };
+    }
+  } catch (error) {
+    console.error('Turnstile verification error:', error.message || error);
+    return { ok: false, status: 502, message: 'Verifikasi keamanan sedang bermasalah. Silakan coba lagi beberapa saat lagi.' };
+  }
+
+  return { ok: true };
+}
+
 async function sendResendEmail(apiKey, payload) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -445,6 +478,15 @@ export async function handleContactRequest({ method = 'POST', body = {}, headers
       status: 400,
       headers: jsonHeaders,
       body: JSON.stringify({ ok: false, message: 'Pesan terlalu pendek atau terlihat tidak valid. Mohon isi deskripsi dengan lebih jelas.' })
+    };
+  }
+
+  const turnstile = await verifyTurnstileToken(normalize(data.token, 4096), clientIp);
+  if (!turnstile.ok) {
+    return {
+      status: turnstile.status,
+      headers: jsonHeaders,
+      body: JSON.stringify({ ok: false, message: turnstile.message })
     };
   }
 

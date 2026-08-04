@@ -255,16 +255,58 @@ window.addEventListener('keydown', event => {
     }
 });
 
-// Form Email via Vercel Function + Resend
+// Form Email via Vercel Function + Resend + Cloudflare Turnstile
 const contactForm = document.getElementById('contactForm');
 const contactFormStartedAt = Date.now();
+let pendingContactSubmission = null;
+
+function getContactSubmitButton() {
+    return document.getElementById('btnSubmitEmail');
+}
+
+function restoreContactSubmitButton() {
+    const btnSubmit = getContactSubmitButton();
+    if (!btnSubmit) return;
+    btnSubmit.innerHTML = btnSubmit.dataset.originalText || 'KIRIM PESAN EMAIL';
+    btnSubmit.disabled = false;
+}
+
+function resetTurnstile() {
+    const widgetId = document.getElementById('turnstile-widget')?.dataset.widgetId;
+    if (window.turnstile && widgetId) {
+        window.turnstile.reset(widgetId);
+    }
+}
+
+async function ensureTurnstileWidget() {
+    const widget = document.getElementById('turnstile-widget');
+    const siteKey = widget?.dataset.sitekey || '';
+    if (!widget || !siteKey || siteKey === 'YOUR_CLOUDFLARE_TURNSTILE_SITE_KEY') {
+        throw new Error('Turnstile site key belum diatur.');
+    }
+
+    await window.turnstileReady;
+    if (!window.turnstile) throw new Error('Turnstile gagal dimuat.');
+
+    if (!widget.dataset.widgetId) {
+        widget.dataset.widgetId = window.turnstile.render(widget, {
+            sitekey: siteKey,
+            execution: 'execute',
+            appearance: 'interaction-only',
+            callback: window.onTurnstileSuccess,
+            'error-callback': window.onTurnstileError,
+            'expired-callback': window.onTurnstileExpired
+        });
+    }
+
+    return widget.dataset.widgetId;
+}
+
 if (contactForm) {
     contactForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const form = e.target;
-        const btnSubmit = document.getElementById('btnSubmitEmail');
+        const btnSubmit = getContactSubmitButton();
         const name = document.getElementById('name')?.value || '';
-        const originalText = btnSubmit?.innerHTML || 'KIRIM PESAN EMAIL';
 
         const emailValue = document.getElementById('email')?.value.trim() || '';
         const subjectValue = document.getElementById('subject')?.value.trim() || '';
@@ -282,51 +324,79 @@ if (contactForm) {
         }
 
         if (btnSubmit) {
+            btnSubmit.dataset.originalText = btnSubmit.innerHTML;
             btnSubmit.innerHTML = 'MENGIRIM...';
             btnSubmit.disabled = true;
         }
 
+        let turnstileWidgetId;
         try {
-            const payload = {
-                name: name.trim(),
-                email: emailValue,
-                subject: subjectValue,
-                message: messageValue,
-                company_website: document.getElementById('company_website')?.value || '',
-                form_started_at: contactFormStartedAt,
-                page: window.location.href
-            };
-
-            const response = await fetch(form.action, {
-                method: form.method || 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            let result = {};
-            try {
-                result = await response.json();
-            } catch (_) {}
-
-            if (response.ok && result.ok) {
-                showCustomAlert('Pesan Terkirim!', `Terima kasih, Bapak/Ibu ${name}. Permohonan konsultasi Anda telah masuk ke sistem ABS Law Office. Representatif kami akan merespons dalam 1x24 jam.`, true);
-                form.reset();
-            } else {
-                showCustomAlert('Gagal Mengirim', result.message || 'Maaf, terjadi kesalahan saat mengirim pesan. Silakan coba lagi beberapa saat lagi.', false);
-            }
-        } catch (error) {
-            showCustomAlert('Koneksi Bermasalah', 'Terjadi kesalahan jaringan saat mencoba mengirim pesan. Silakan coba lagi beberapa saat lagi.', false);
-        } finally {
-            if (btnSubmit) {
-                btnSubmit.innerHTML = originalText;
-                btnSubmit.disabled = false;
-            }
+            turnstileWidgetId = await ensureTurnstileWidget();
+        } catch (_) {
+            showCustomAlert('Verifikasi Belum Siap', 'Verifikasi keamanan belum dapat dimuat. Silakan muat ulang halaman atau coba lagi beberapa saat lagi.', false);
+            restoreContactSubmitButton();
+            return;
         }
+
+        pendingContactSubmission = {
+            name: name.trim(),
+            email: emailValue,
+            subject: subjectValue,
+            message: messageValue,
+            company_website: document.getElementById('company_website')?.value || '',
+            form_started_at: contactFormStartedAt,
+            page: window.location.href
+        };
+
+        window.turnstile.execute(turnstileWidgetId);
     });
 }
+
+window.onTurnstileSuccess = async function (token) {
+    if (!contactForm || !pendingContactSubmission || !token) return;
+
+    const payload = { ...pendingContactSubmission, token };
+    pendingContactSubmission = null;
+
+    try {
+        const response = await fetch(contactForm.action || '/api/contact', {
+            method: contactForm.method || 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        let result = {};
+        try {
+            result = await response.json();
+        } catch (_) {}
+
+        if (response.ok && result.ok) {
+            showCustomAlert('Pesan Terkirim!', `Terima kasih, Bapak/Ibu ${payload.name}. Permohonan konsultasi Anda telah masuk ke sistem ABS Law Office. Representatif kami akan merespons dalam 1x24 jam.`, true);
+            contactForm.reset();
+        } else {
+            showCustomAlert('Gagal Mengirim', result.message || 'Maaf, terjadi kesalahan saat mengirim pesan. Silakan coba lagi beberapa saat lagi.', false);
+        }
+    } catch (_) {
+        showCustomAlert('Koneksi Bermasalah', 'Terjadi kesalahan jaringan saat mencoba mengirim pesan. Silakan coba lagi beberapa saat lagi.', false);
+    } finally {
+        restoreContactSubmitButton();
+        resetTurnstile();
+    }
+};
+
+window.onTurnstileError = function () {
+    pendingContactSubmission = null;
+    restoreContactSubmitButton();
+    showCustomAlert('Verifikasi Gagal', 'Verifikasi keamanan tidak dapat diselesaikan. Silakan coba kembali.', false);
+};
+
+window.onTurnstileExpired = function () {
+    pendingContactSubmission = null;
+    restoreContactSubmitButton();
+};
 
 
 function sendToWA() {

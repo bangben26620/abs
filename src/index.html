@@ -27,6 +27,8 @@
 
     <link rel="stylesheet" href="assets/css/style.min.css">
 
+    <script>window.turnstileReady = new Promise((resolve) => { window.onTurnstileLoad = resolve; });</script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad&render=explicit" async defer></script>
     <script src="assets/js/main.min.js" defer></script>
     <script type="application/ld+json">
     {
@@ -757,6 +759,8 @@
                         <label for="company_website">Website Perusahaan</label>
                         <input type="text" id="company_website" name="company_website" tabindex="-1" autocomplete="off">
                     </div>
+
+                    <div id="turnstile-widget" data-sitekey="0x4AAAAAAEFlsIkz5VXsGDTO" aria-hidden="true"></div>
 
                     <div class="contact-actions">
                         <button type="submit" id="btnSubmitEmail" class="contact-btn contact-btn-gold">
